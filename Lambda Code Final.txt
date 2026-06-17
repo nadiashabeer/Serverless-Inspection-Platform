@@ -1,0 +1,70 @@
+import json
+import boto3
+import uuid
+from datetime import datetime
+
+# Initialize resources outside the handler
+s3 = boto3.client('s3')
+dynamodb = boto3.resource('dynamodb')
+table = dynamodb.Table('Inspections')
+
+# Verified Bucket Name
+BUCKET_NAME = 'my-inspection-platform-project-3'
+
+def lambda_handler(event, context):
+    try:
+        # Generate keys required by your DynamoDB table schema
+        inspection_id = str(uuid.uuid4())
+        current_time = int(datetime.now().timestamp()) # Generates the missing timestamp key
+        
+        file_name = f"inspections/{inspection_id}.jpg"
+        
+        # 1. Generate Presigned URL
+        presigned_url = s3.generate_presigned_url(
+            'put_object',
+            Params={
+                'Bucket': BUCKET_NAME,
+                'Key': file_name,
+                'ContentType': 'image/jpeg'
+            },
+            ExpiresIn=300
+        )
+        
+        # 2. Save metadata to DynamoDB (Including both required keys)
+        table.put_item(
+            Item={
+                'inspectionId': inspection_id,
+                'timestamp': current_time,       # Fixes the ValidationException!
+                'imagePath': file_name,
+                'status': 'Pending'
+            }
+        )
+        
+        # 3. Successful Response
+        return {
+            'statusCode': 200,
+            'headers': {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "OPTIONS,POST"
+            },
+            'body': json.dumps({
+                'uploadUrl': presigned_url,
+                'inspectionId': inspection_id
+            })
+        }
+        
+    except Exception as e:
+        print("CRASH DETAILS:", str(e))
+        return {
+            'statusCode': 400,
+            'headers': {
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "OPTIONS,POST"
+            },
+            'body': json.dumps({
+                'uploadUrl': '',
+                'inspectionId': f"ERROR_LAUNCHING: {str(e)}"
+            })
+        }
